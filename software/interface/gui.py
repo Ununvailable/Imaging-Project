@@ -43,7 +43,7 @@ class CameraMotorGUI:
         cam_control_frame.pack(pady=5)
         
         ttk.Label(cam_control_frame, text="Camera Index:").pack(side=tk.LEFT, padx=5)
-        self.camera_index_var = tk.StringVar(value="0")
+        self.camera_index_var = tk.StringVar(value="1")
         ttk.Entry(cam_control_frame, textvariable=self.camera_index_var, width=5).pack(side=tk.LEFT, padx=5)
         
         ttk.Button(cam_control_frame, text="Start Camera", command=self.start_camera).pack(side=tk.LEFT, padx=5)
@@ -195,6 +195,7 @@ class CameraMotorGUI:
         self.camera_running = False
         if self.cap:
             self.cap.release()
+        self.camera_index = "1"
         self.canvas.delete("all")
         self.log_response("Camera stopped")
     
@@ -226,39 +227,48 @@ class CameraMotorGUI:
             messagebox.showwarning("Camera Error", "Camera not running")
     
     # Motor control commands
+    def stop_motor(self):
+        self.send_command("STOP")
+
     def move_relative(self):
+        self.stop_motor()
         steps = self.steps_var.get()
         self.send_command(f"MOVE_REL {steps}")
     
     def move_absolute(self):
+        self.stop_motor()
         steps = self.steps_var.get()
         self.send_command(f"MOVE_ABS {steps}")
     
     def jog_move(self, direction):
+        self.stop_motor()
         self.send_command(f"JOGGING {direction}")
     
-    def stop_motor(self):
-        self.send_command("STOP")
-    
     def emergency_stop(self):
+        self.stop_motor()
         self.send_command("E")
     
     def move_origin(self):
+        self.stop_motor()
         self.send_command("ORIGIN")
     
     def check_status(self):
+        self.stop_motor()
         self.send_command("STATUS")
     
     def get_angle(self):
+        self.stop_motor()
         self.send_command("ANGLE")
     
     def set_speed(self):
+        self.stop_motor()
         min_speed = self.min_speed_var.get()
         max_speed = self.max_speed_var.get()
         accel = self.accel_var.get()
         self.send_command(f"SET SPEED S{min_speed}F{max_speed}R{accel}")
     
     def on_closing(self):
+        self.stop_motor()
         self.stop_camera()
         self.disconnect_serial()
         self.root.destroy()
