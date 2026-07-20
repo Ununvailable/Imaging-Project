@@ -13,31 +13,58 @@ class BaslerAceController:
         self.converter = None
 
     def open(self, width: int = None, height: int = None):
-        """Open first detected Basler device, optionally set resolution."""
-        raise NotImplementedError
+        self.camera = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
+        self.camera.Open()
+
+        if width is not None:
+            self.camera.Width.Value = min(width, self.camera.Width.Max)
+        if height is not None:
+            self.camera.Height.Value = min(height, self.camera.Height.Max)
+
+        self.converter = pylon.ImageFormatConverter()
+        self.converter.OutputPixelFormat = pylon.PixelType_BGR8packed
+        self.converter.OutputBitAlignment = pylon.OutputBitAlignment_MsbAligned
 
     def close(self):
-        """Stop grabbing and close camera if open."""
-        raise NotImplementedError
+        if self.camera is None:
+            return
+        if self.camera.IsGrabbing():
+            self.camera.StopGrabbing()
+        if self.camera.IsOpen():
+            self.camera.Close()
+        self.camera = None
 
     def start_grabbing(self):
-        raise NotImplementedError
+        self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
 
     def stop_grabbing(self):
-        raise NotImplementedError
+        if self.camera is not None and self.camera.IsGrabbing():
+            self.camera.StopGrabbing()
 
     def grab_frame(self, timeout_ms: int = 1000):
-        """Return a single BGR numpy array, or None on failed/timed-out grab."""
-        raise NotImplementedError
+        if not self.is_grabbing():
+            return None
+        grab_result = self.camera.RetrieveResult(timeout_ms, pylon.TimeoutHandling_Return)
+        try:
+            if not grab_result.GrabSucceeded():
+                return None
+            image = self.converter.Convert(grab_result)
+            return image.GetArray()  # BGR numpy array
+        finally:
+            grab_result.Release()
 
     def set_exposure(self, exposure_us: float, auto_off: bool = True):
-        raise NotImplementedError
+        if auto_off:
+            self.camera.ExposureAuto.SetValue("Off")
+        self.camera.ExposureTime.SetValue(exposure_us)
 
     def set_gain(self, gain: float, auto_off: bool = True):
-        raise NotImplementedError
+        if auto_off:
+            self.camera.GainAuto.SetValue("Off")
+        self.camera.Gain.SetValue(gain)
 
     def is_open(self) -> bool:
-        raise NotImplementedError
+        return self.camera is not None and self.camera.IsOpen()
 
     def is_grabbing(self) -> bool:
-        raise NotImplementedError
+        return self.camera is not None and self.camera.IsGrabbing()
