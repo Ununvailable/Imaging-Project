@@ -139,7 +139,8 @@ class CameraMotorGUI:
         ttk.Entry(sweep_frame, textvariable=self.step_angle_var, width=8).grid(row=0, column=5, padx=5)
 
         ttk.Button(sweep_frame, text="Capture References", command=self.capture_references).grid(row=0, column=6, padx=5)
-        ttk.Button(sweep_frame, text="Start Sweep", command=self.start_sweep).grid(row=0, column=7, padx=5)
+        self.start_sweep_button = ttk.Button(sweep_frame, text="Start Sweep", command=self.start_sweep)
+        self.start_sweep_button.grid(row=0, column=7, padx=5)
         ttk.Button(sweep_frame, text="Abort Sweep", command=self.abort_sweep).grid(row=0, column=8, padx=5)
 
         self.sweep_progress = ttk.Label(sweep_frame, text="Idle")
@@ -304,6 +305,8 @@ class CameraMotorGUI:
             self.acquisition.create_dataset()
             self.log(f"Dataset created: {self.acquisition.dataset_name}")
 
+        self.start_sweep_button.config(state=tk.DISABLED)
+
         def worker():
             self.root.after(0, lambda: self.sweep_progress.config(text="Running"))
             try:
@@ -318,6 +321,8 @@ class CameraMotorGUI:
             except Exception as e:
                 self.root.after(0, lambda: self.sweep_progress.config(text="Error"))
                 self.root.after(0, lambda err=e: self.log(f"Sweep error: {err}"))
+            finally:
+                self.root.after(0, lambda: self.start_sweep_button.config(state=tk.NORMAL))
 
         threading.Thread(target=worker, daemon=True).start()
 

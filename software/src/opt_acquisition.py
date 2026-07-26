@@ -7,6 +7,7 @@ Owns dataset naming, folder creation, and metadata.json writing.
 from datetime import datetime
 import os
 import json
+import time
 import numpy as np
 from PIL import Image
 
@@ -16,7 +17,7 @@ from src.stepper_controller import StepperController
 
 class OPTAcquisition:
     def __init__(self, data_root: str = "data", steps_per_degree: float = 400.0,
-                 file_format: str = "tiff"):
+                 file_format: str = "png"):
         self.data_root = data_root
         self.steps_per_degree = steps_per_degree
         self.file_format = file_format.lower()
@@ -30,6 +31,7 @@ class OPTAcquisition:
         self.reconstruction_path = None
 
         self._aborted = False
+        self._sweep_running = False
         self._last_completed_index = -1
         self._angles = []
 
@@ -62,33 +64,65 @@ class OPTAcquisition:
         if dark is not None:
             self._save_frame(dark, os.path.join(self.dataset_path, f"dark_field.{self.file_format}"))
 
+    def _move_one_increment(self, steps: int, frame_index: int, max_retries: int = 3,
+                             settle_delay_s: float = 1.0):
+        """
+        Move by `steps` and wait for idle. The firmware intermittently replies
+        'Wrong Command' to an isolated query without actually desyncing motion —
+        observed to self-recover on the next attempt. Retry a few times before
+        treating it as fatal.
+
+        settle_delay_s: extra pause held after the GSC-01 first reports 'R' and
+        before releasing the lock for the next STOP/MOVE_REL cycle. Testing
+        whether the device needs more internal settle time than the raw 'R'
+        flag implies.
+        """
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                with self.motor.lock:
+                    self.motor.stop()
+                    self.motor.move_relative(steps)
+                    idle = self.motor.wait_until_idle()
+                    if idle:
+                        time.sleep(settle_delay_s)
+                if idle:
+                    return
+                last_error = f"did not settle (attempt {attempt}/{max_retries})"
+            except RuntimeError as e:
+                last_error = f"{e} (attempt {attempt}/{max_retries})"
+            time.sleep(0.5)
+
+        raise RuntimeError(f"Motor failed at frame {frame_index}: {last_error}")
+
     def run_sweep(self, start_angle: float, end_angle: float, step_deg: float):
         if self.dataset_path is None:
             raise RuntimeError("Call create_dataset() first")
+        if self._sweep_running:
+            raise RuntimeError("A sweep is already running")
 
-        self._aborted = False
-        self._angles = list(np.arange(start_angle, end_angle, step_deg))
-        steps_per_increment = round(step_deg * self.steps_per_degree)
+        self._sweep_running = True
+        try:
+            self._aborted = False
+            self._angles = list(np.arange(start_angle, end_angle, step_deg))
+            steps_per_increment = round(step_deg * self.steps_per_degree)
 
-        for index, angle in enumerate(self._angles):
-            if self._aborted:
-                break
+            for index, angle in enumerate(self._angles):
+                if self._aborted:
+                    break
 
-            if index > 0:
-                with self.motor.lock:
-                    self.motor.stop()
-                    self.motor.move_relative(steps_per_increment)
-                    idle = self.motor.wait_until_idle()
-                if not idle:
-                    raise RuntimeError(f"Motor did not settle before frame {index}")
+                if index > 0:
+                    self._move_one_increment(steps_per_increment, index)
 
-            frame = self.camera.grab_frame(timeout_ms=2000)
-            if frame is None:
-                raise RuntimeError(f"Capture failed at index {index}, angle {angle}")
+                frame = self.camera.grab_frame(timeout_ms=2000)
+                if frame is None:
+                    raise RuntimeError(f"Capture failed at index {index}, angle {angle}")
 
-            filename = f"{index + 1:03d}.{self.file_format}"
-            self._save_frame(frame, os.path.join(self.projections_path, filename))
-            self._last_completed_index = index
+                filename = f"{index + 1:03d}.{self.file_format}"
+                self._save_frame(frame, os.path.join(self.projections_path, filename))
+                self._last_completed_index = index
+        finally:
+            self._sweep_running = False
 
     def abort(self):
         self._aborted = True

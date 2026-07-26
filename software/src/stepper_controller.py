@@ -13,6 +13,7 @@ import time
 
 class StepperController:
     BAUD_RATE = 9600  # fixed by firmware
+    COMMAND_GAP_S = 0.5  # minimum spacing between writes; Arduino parser can't keep up otherwise
 
     def __init__(self):
         self.serial_port = None
@@ -21,6 +22,7 @@ class StepperController:
         self._idle_event = threading.Event()
         self._error_event = threading.Event()
         self._last_error = None
+        self._last_write_time = 0.0
         self.lock = threading.RLock()
 
     @staticmethod
@@ -43,8 +45,12 @@ class StepperController:
         if not self.is_connected():
             raise RuntimeError("Not connected to serial port")
         with self.lock:
+            elapsed = time.time() - self._last_write_time
+            if elapsed < self.COMMAND_GAP_S:
+                time.sleep(self.COMMAND_GAP_S - elapsed)
             try:
                 self.serial_port.write((command + '\n').encode())
+                self._last_write_time = time.time()
             except serial.SerialException as e:
                 self.rx_queue.put(("disconnected", str(e)))
                 raise
@@ -56,14 +62,11 @@ class StepperController:
                     line = self.serial_port.readline().decode(errors="replace").strip()
                     if line:
                         self.rx_queue.put(("rx", line))
-                        if "IDLE" in line.upper():
-                            self._idle_event.set()
                         # GSC-01 status reply format: "<position>,<LS1>,<LS2>,<R|B>"
                         # R = ready/idle, B = busy/moving
                         parts = line.split(",")
                         if len(parts) == 4:
                             status_flag = parts[-1].strip().upper()
-                            print(status_flag)
                             if status_flag == "R":
                                 self._idle_event.set()
                         if "WRONG COMMAND" in line.upper():
@@ -103,12 +106,9 @@ class StepperController:
     def set_speed(self, min_speed: int, max_speed: int, accel: int):
         self.send_command(f"SET SPEED S{min_speed}F{max_speed}R{accel}")
 
-    def wait_until_idle(self, timeout_s: float = 10.0, poll_interval_s: float = 0.2) -> bool:
+    def wait_until_idle(self, timeout_s: float = 20.0, poll_interval_s: float = 2.0) -> bool:
         """
-        Poll STATUS until response contains 'IDLE', or timeout.
-        ASSUMPTION: firmware STATUS reply includes the literal token 'IDLE' when
-        motion has completed. Not verified against actual firmware — confirm
-        and adjust the match condition before relying on this for capture timing.
+        Poll STATUS until the GSC-01 CSV reply's last field is 'R' (ready), or timeout.
         """
         deadline = time.time() + timeout_s
         while time.time() < deadline:
