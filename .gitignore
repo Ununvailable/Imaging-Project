@@ -138,6 +138,7 @@ venv.bak/
 software/.venv/
 
 software/.venv_oct/
+software/.opt/
 
 # Spyder project settings
 .spyderproject
