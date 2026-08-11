@@ -20,6 +20,8 @@ class CameraMotorGUI:
 
         self.acquisition = OPTAcquisition()
         self.live_view_running = False
+        # Tracks whether live view should auto-resume once a sweep finishes.
+        self._live_view_was_running_before_sweep = False
 
         self.setup_gui()
 
@@ -55,18 +57,18 @@ class CameraMotorGUI:
         camera_frame = ttk.LabelFrame(main_frame, text="Camera Feed", padding="10")
         camera_frame.grid(row=0, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
 
-        self.canvas = tk.Canvas(camera_frame, width=640, height=480, bg='gray')
+        self.canvas = tk.Canvas(camera_frame, width=1280, height=960, bg='gray')
         self.canvas.pack()
 
         cam_control_frame = ttk.Frame(camera_frame)
         cam_control_frame.pack(pady=5)
 
         ttk.Label(cam_control_frame, text="Width:").pack(side=tk.LEFT, padx=5)
-        self.cam_width_var = tk.StringVar(value="640")
+        self.cam_width_var = tk.StringVar(value="1280")
         ttk.Entry(cam_control_frame, textvariable=self.cam_width_var, width=6).pack(side=tk.LEFT, padx=5)
 
         ttk.Label(cam_control_frame, text="Height:").pack(side=tk.LEFT, padx=5)
-        self.cam_height_var = tk.StringVar(value="480")
+        self.cam_height_var = tk.StringVar(value="960")
         ttk.Entry(cam_control_frame, textvariable=self.cam_height_var, width=6).pack(side=tk.LEFT, padx=5)
 
         ttk.Button(cam_control_frame, text="Start Camera", command=self.start_camera).pack(side=tk.LEFT, padx=5)
@@ -205,16 +207,32 @@ class CameraMotorGUI:
     def update_live_view(self):
         if not self.live_view_running:
             return
+
+        # Don't grab while a sweep holds the camera lock (e.g. mid-exposure
+        # or moving between frames): pypylon allows only one outstanding
+        # RetrieveResult() at a time, so a blocking wait here would either
+        # stall the UI or race the sweep and raise RuntimeException. Skip
+        # this tick instead and try again on the next poll.
+        acquired = self.acquisition.camera_lock.acquire(blocking=False)
+        if not acquired:
+            self.root.after(30, self.update_live_view)
+            return
+
         try:
             frame = self.acquisition.camera.grab_frame(timeout_ms=100)
-            if frame is not None:
-                rgb = frame[..., ::-1]
-                img = Image.fromarray(rgb)
-                imgtk = ImageTk.PhotoImage(image=img)
-                self.canvas.create_image(0, 0, anchor=tk.NW, image=imgtk)
-                self.canvas.imgtk = imgtk
         except Exception as e:
+            frame = None
             self.log(f"Live view error: {e}")
+        finally:
+            self.acquisition.camera_lock.release()
+
+        if frame is not None:
+            rgb = frame[..., ::-1]
+            img = Image.fromarray(rgb)
+            imgtk = ImageTk.PhotoImage(image=img)
+            self.canvas.create_image(0, 0, anchor=tk.NW, image=imgtk)
+            self.canvas.imgtk = imgtk
+
         self.root.after(30, self.update_live_view)
 
     def lock_exposure(self):
@@ -307,6 +325,13 @@ class CameraMotorGUI:
 
         self.start_sweep_button.config(state=tk.DISABLED)
 
+        # Pause live view for the duration of the sweep so the sweep thread
+        # gets uncontended access to the camera lock between frames; live
+        # view still works during a sweep via the lock, but pausing avoids
+        # needless contention/log noise and is resumed automatically after.
+        self._live_view_was_running_before_sweep = self.live_view_running
+        self.live_view_running = False
+
         def worker():
             self.root.after(0, lambda: self.sweep_progress.config(text="Running"))
             try:
@@ -323,8 +348,15 @@ class CameraMotorGUI:
                 self.root.after(0, lambda err=e: self.log(f"Sweep error: {err}"))
             finally:
                 self.root.after(0, lambda: self.start_sweep_button.config(state=tk.NORMAL))
+                self.root.after(0, self._resume_live_view_if_needed)
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _resume_live_view_if_needed(self):
+        if self._live_view_was_running_before_sweep and self.acquisition.camera.is_grabbing():
+            self.live_view_running = True
+            self.update_live_view()
+        self._live_view_was_running_before_sweep = False
 
     def abort_sweep(self):
         self.acquisition.abort()

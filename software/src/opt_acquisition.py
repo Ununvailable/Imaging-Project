@@ -8,6 +8,7 @@ from datetime import datetime
 import os
 import json
 import time
+import threading
 import numpy as np
 from PIL import Image
 
@@ -24,6 +25,13 @@ class OPTAcquisition:
 
         self.camera = BaslerAceController()
         self.motor = StepperController()
+
+        # Serializes all camera.grab_frame() calls. pypylon's InstantCamera
+        # only permits one outstanding RetrieveResult() at a time; without
+        # this, live view (GUI thread) and a running sweep (worker thread)
+        # collide and pylon raises RuntimeException("There is already a
+        # thread waiting for a result").
+        self.camera_lock = threading.Lock()
 
         self.dataset_name = None
         self.dataset_path = None
@@ -52,15 +60,22 @@ class OPTAcquisition:
     def _save_frame(self, frame: np.ndarray, path: str):
         Image.fromarray(frame[..., ::-1]).save(path)  # BGR -> RGB
 
+    def grab_frame_locked(self, timeout_ms: int = 1000):
+        """Thread-safe grab_frame wrapper. Use this instead of calling
+        self.camera.grab_frame() directly whenever live view may be running
+        concurrently with a sweep (i.e. always, from GUI code)."""
+        with self.camera_lock:
+            return self.camera.grab_frame(timeout_ms=timeout_ms)
+
     def capture_reference_frames(self):
         if self.dataset_path is None:
             raise RuntimeError("Call create_dataset() first")
 
-        flat = self.camera.grab_frame(timeout_ms=2000)
+        flat = self.grab_frame_locked(timeout_ms=2000)
         if flat is not None:
             self._save_frame(flat, os.path.join(self.dataset_path, f"flat_field.{self.file_format}"))
 
-        dark = self.camera.grab_frame(timeout_ms=2000)
+        dark = self.grab_frame_locked(timeout_ms=2000)
         if dark is not None:
             self._save_frame(dark, os.path.join(self.dataset_path, f"dark_field.{self.file_format}"))
 
@@ -95,6 +110,26 @@ class OPTAcquisition:
 
         raise RuntimeError(f"Motor failed at frame {frame_index}: {last_error}")
 
+    def _grab_frame_with_retry(self, index: int, max_retries: int = 3,
+                                retry_delay_s: float = 0.5, timeout_ms: int = 2000):
+        """
+        Grab a projection frame, retrying on transient camera errors (e.g. a
+        pylon RuntimeException from a stray concurrent retrieval) instead of
+        letting one bad grab abort the whole sweep.
+        """
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                frame = self.grab_frame_locked(timeout_ms=timeout_ms)
+                if frame is not None:
+                    return frame
+                last_error = "grab_frame returned None"
+            except Exception as e:
+                last_error = str(e)
+            time.sleep(retry_delay_s)
+
+        raise RuntimeError(f"Capture failed at index {index}: {last_error}")
+
     def run_sweep(self, start_angle: float, end_angle: float, step_deg: float):
         if self.dataset_path is None:
             raise RuntimeError("Call create_dataset() first")
@@ -114,15 +149,16 @@ class OPTAcquisition:
                 if index > 0:
                     self._move_one_increment(steps_per_increment, index)
 
-                frame = self.camera.grab_frame(timeout_ms=2000)
-                if frame is None:
-                    raise RuntimeError(f"Capture failed at index {index}, angle {angle}")
+                frame = self._grab_frame_with_retry(index)
 
                 filename = f"{index + 1:03d}.{self.file_format}"
                 self._save_frame(frame, os.path.join(self.projections_path, filename))
                 self._last_completed_index = index
         finally:
             self._sweep_running = False
+
+    def is_sweep_running(self) -> bool:
+        return self._sweep_running
 
     def abort(self):
         self._aborted = True
