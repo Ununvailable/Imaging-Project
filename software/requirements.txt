@@ -1,4 +1,21 @@
-opencv-python==4.10.0.84
-# tkinter
-Pillow
-pyserial
+# opencv-python==4.10.0.84
+# # tkinter
+# Pillow
+# pyserial
+
+# Camera (Basler Ace, via pypylon) - requires Pylon SDK installed on the host
+pypylon>=3.0.0
+
+# Motor serial communication
+pyserial>=3.5
+
+# Image I/O
+Pillow==12.1.1
+
+# Numerical + sinogram/reconstruction
+numpy==2.4.4
+scikit-image==0.26.0
+
+# tkinter (GUI) ships with the Python standard library on Windows/macOS installers;
+# on Linux it must be installed via the OS package manager, e.g.:
+#   sudo apt-get install python3-tk

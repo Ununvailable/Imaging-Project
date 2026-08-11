@@ -137,6 +137,8 @@ env.bak/
 venv.bak/
 software/.venv/
 
+software/.venv_oct/
+
 # Spyder project settings
 .spyderproject
 .spyproject

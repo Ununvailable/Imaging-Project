@@ -1,0 +1,12 @@
+name: opt
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - numpy=2.4.4
+  - pillow=12.1.1
+  - scikit-image=0.26.0
+  - pyserial
+  - matplotlib
+  - tk
+  - pip
