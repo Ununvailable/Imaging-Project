@@ -7,10 +7,10 @@ from src.opt_result_view import view_volume
 
 
 if __name__ == "__main__":
-    # root = tk.Tk()
-    # app = CameraMotorGUI(root)
-    # root.protocol("WM_DELETE_WINDOW", app.on_closing)
-    # root.mainloop()
+    root = tk.Tk()
+    app = CameraMotorGUI(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    root.mainloop() 
 
     # recon = OPTReconstructor("data/20260809_22_20_29")
 
@@ -25,4 +25,4 @@ if __name__ == "__main__":
 
     # print(result["volume_shape"])  # (num_rows, out_h, out_w)
 
-    view_volume("data/20260809_22_20_29/reconstruction/volume.npy")
+    # view_volume("data/20260809_22_20_29/reconstruction/volume.npy")
