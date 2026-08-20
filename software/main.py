@@ -18,21 +18,18 @@ if __name__ == "__main__":
     # print(result)  # {'cor_offset_px': ..., 'angle_pair_deg': (0.0, ~180.0), ...}
 
     # recon = OPTReconstructor("data/20260817_14_05_08")
-    recon = OPTReconstructor("data/20260817_14_05_08", iterations=150)  # tune from here
+    # recon = OPTReconstructor("data/20260817_14_05_08", iterations=150)  # tune from here
 
     # # Full image height
     # result = recon.reconstruct_volume()
 
-    # A specific band of rows
-    result = recon.reconstruct_volume(row_start=400, row_end=600, invert=False) 
+    # # A specific band of rows
+    # result = recon.reconstruct_volume(row_start=400, row_end=600, invert=False) 
 
     # # Every 4th row (coarse preview, faster)
     # result = recon.reconstruct_volume(step=2)
 
     # print(result["volume_shape"])  # (num_rows, out_h, out_w)
 
-<<<<<<< HEAD
     # view_volume("data/20260809_22_20_29/reconstruction/volume.npy")
-=======
-    view_volume("data/20260817_14_05_08/reconstruction/volume.npy")
->>>>>>> 3808b8fdbb147c52050844eb7a3805cf127cc752
+    # view_volume("data/20260817_14_05_08/reconstruction/volume.npy")
